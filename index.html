@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Accuracy King</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body{margin:0;font-family:Segoe UI;background:#111;color:#fff}
+h1{text-align:center;color:#00ffff}
+#loginScreen{display:flex;justify-content:center;align-items:center;height:100vh;background:linear-gradient(45deg,#ff0040,#00c0ff,#00ff6c)}
+.login-box{background:#000;padding:30px;border-radius:15px;text-align:center;box-shadow:0 0 20px #0ff}
+.login-box input{padding:10px;margin:10px;width:220px;border-radius:8px;border:none}
+.login-box button{padding:10px 25px;border:none;border-radius:8px;background:#0ff;font-weight:bold;cursor:pointer}
+#mainPage{display:none;padding:20px;max-width:1000px;margin:auto}
+#timer{font-size:26px;text-align:center;margin-bottom:10px;color:#0ff}
+.box{background:#1e1e1e;padding:15px;border-radius:15px;margin-top:15px;box-shadow:0 0 15px #0ff}
+.predictor-box{text-align:center;padding:20px;background:#222;border-radius:15px;box-shadow:0 0 20px #0ff}
+.predictor-pill{padding:10px 20px;border-radius:50px;font-weight:bold}
+.big{background:red}
+.small{background:lime;color:black}
+.none{background:yellow;color:black}
+table{width:100%;border-collapse:collapse}
+th,td{border:1px solid #444;padding:8px;text-align:center}
+th{background:#333}
+input.search{padding:10px;margin-top:10px;width:250px;border-radius:8px;border:none}
+button.search-btn{padding:10px 20px;margin-top:10px;border:none;border-radius:8px;background:#00ffff;font-weight:bold}
+.win{color:#00ff6c;font-weight:bold}
+.loss{color:#ff0040;font-weight:bold}
+.pending{color:#ffcc00;font-weight:bold}
+.clear-btn{background:#ff0040;color:#fff;padding:8px 16px;border:none;border-radius:8px;cursor:pointer;margin-bottom:10px;font-weight:bold}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <h2>Login</h2>
+    <input type="email" id="email" placeholder="Email"><br>
+    <input type="password" id="password" placeholder="Password"><br>
+    <button onclick="login()">Login</button>
+    <div id="loginMsg"></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="mainPage">
+  <h1>LOGICLESS PREDICTOR</h1>
+  <div id="timer">--</div>
+
+  <div class="predictor-box">
+    Prediction:
+    <span id="predictionText" class="predictor-pill none">No Trade</span>
+    <br><br>
+    <label>
+      <input type="checkbox" id="beepToggle" checked> Beep On/Off
+    </label>
+    <audio id="beepSound" src="https://www.soundjay.com/buttons_c2026/sounds/beep-01a.mp3"></audio>
+  </div>
+
+  <div class="box">
+    <h2>Last 10 Results</h2>
+    <table>
+      <thead>
+        <tr><th>Period</th><th>Number</th><th>Big/Small</th></tr>
+      </thead>
+      <tbody id="liveResults"></tbody>
+    </table>
+  </div>
+
+  <div class="box">
+    <h2>Manual Search</h2>
+    <input class="search" type="text" id="manualSeq" placeholder="Enter sequence">
+    <br>
+    <button class="search-btn" onclick="manualSearch()">Search</button>
+    <div id="manualResult" style="margin-top:15px;font-size:18px;"></div>
+  </div>
+
+  <!-- NEW: PREDICTION HISTORY -->
+  <div class="box">
+    <h2>📜 Prediction History</h2>
+    <button class="clear-btn" onclick="clearHistory()">Clear History</button>
+    <table>
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Prediction</th>
+          <th>Actual</th>
+          <th>Result</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody id="historyTable"></tbody>
+    </table>
+    <div id="historyStats" style="margin-top:15px;text-align:center;font-size:18px;"></div>
+  </div>
+</div>
+
+<script>
+const supabaseUrl="https://xujisqauxmqiwdazphpn.supabase.co";
+const supabaseKey="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh1amlzcWF1eG1xaXdkYXpwaHBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4MjQ4NjIsImV4cCI6MjA4NTQwMDg2Mn0.5HGJsneJvntry-wKpz2wDd5MKe_CDACd99VKaMdrEd0";
+const supabaseClient=window.supabase.createClient(supabaseUrl,supabaseKey);
+
+const API_URL="https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json";
+
+let liveResults=[];
+let autoFetch;
+
+/* LOGIN */
+async function login(){
+const email=document.getElementById("email").value;
+const password=document.getElementById("password").value;
+
+const {error}=await supabaseClient.auth.signInWithPassword({email,password});
+
+if(error){
+document.getElementById("loginMsg").innerText="Login Failed ❌";
+}else{
+document.getElementById("loginScreen").style.display="none";
+document.getElementById("mainPage").style.display="block";
+initApp();
+}
+}
+
+/* INIT */
+function initApp(){
+startTimer();
+fetchData();
+autoFetch=setInterval(fetchData,5000);
+loadHistory();
+}
+
+/* TIMER */
+function startTimer(){
+setInterval(()=>{
+let s=new Date().getSeconds();
+let r=59-s;
+document.getElementById("timer").innerText="Timer: "+(r<10?"0"+r:r);
+},1000);
+}
+
+/* FETCH */
+async function fetchData(){
+try{
+const res=await fetch(API_URL+"?t="+Date.now());
+const json=await res.json();
+if(!json.data?.list) return;
+
+const results=json.data.list.map(r=>({
+period:r.issueNumber,
+digit:r.number,
+bigSmall:parseInt(r.number)>=5?"Big":"Small"
+}));
+
+const latest=results.slice(0,10);
+
+if(!liveResults.length||liveResults[0]?.period!==latest[0]?.period){
+liveResults=latest;
+updateTable();
+await addPrediction(results);
+checkHistoryResults(results); // NEW: check pending predictions
+}
+
+}catch(e){console.log(e);}
+}
+
+/* TABLE */
+function updateTable(){
+const tbody=document.getElementById("liveResults");
+tbody.innerHTML="";
+liveResults.forEach(r=>{
+tbody.innerHTML+=`<tr>
+<td>${r.period}</td>
+<td>${r.digit}</td>
+<td>${r.bigSmall}</td>
+</tr>`;
+});
+}
+
+/* SAVE + PREDICT */
+async function addPrediction(results){
+
+if(results.length<6) return;
+
+const seq=results.slice(1,6).map(r=>r.digit).join('');
+const next=results[0].digit;
+
+await saveData(seq,next);
+
+await autoPredict(results);
+}
+
+async function saveData(seq,next){
+
+const {data}=await supabaseClient
+.from('predictions')
+.select('next_numbers')
+.eq('sequence',seq)
+.maybeSingle();
+
+if(data){
+let arr=data.next_numbers.split(',');
+if(!arr.includes(next)){
+arr.push(next);
+await supabaseClient.from('predictions')
+.update({next_numbers:arr.join(',')})
+.eq('sequence',seq);
+}
+}else{
+await supabaseClient.from('predictions')
+.insert([{sequence:seq,next_numbers:next}]);
+}
+}
+
+/* AUTO PREDICT */
+async function autoPredict(results){
+
+const seq=results.slice(0,5).map(r=>r.digit).join('');
+
+const {data}=await supabaseClient
+.from('predictions')
+.select('*')
+.eq('sequence',seq)
+.maybeSingle();
+
+const predictionText=document.getElementById("predictionText");
+
+if(data){
+const predValue=data.next_numbers.split(',')[0];
+predictionText.innerText=data.next_numbers;
+
+if(parseInt(predValue)>=5)
+predictionText.className="predictor-pill big";
+else
+predictionText.className="predictor-pill small";
+
+// NEW: Save prediction to history
+savePredictionToHistory(results[0].period, predValue);
+
+if(document.getElementById("beepToggle").checked){
+let sound=document.getElementById("beepSound");
+sound.currentTime=0;
+sound.play();
+setTimeout(()=>sound.pause(),3000);
+}
+}else{
+predictionText.innerText="No Trade";
+predictionText.className="predictor-pill none";
+}
+}
+
+/* ========== HISTORY FUNCTIONS ========== */
+
+// Save prediction for the NEXT period (current period + 1)
+function savePredictionToHistory(currentPeriod, prediction){
+let history = JSON.parse(localStorage.getItem('predictionHistory') || '[]');
+
+// The prediction is for the period AFTER the current one
+// WinGo 1M periods increase by 1 each minute
+let nextPeriod = (BigInt(currentPeriod) + 1n).toString();
+
+// Don't duplicate if already saved for this period
+if(history.find(h => h.period === nextPeriod)) return;
+
+history.unshift({
+  period: nextPeriod,
+  prediction: prediction,
+  actual: null,
+  result: 'pending',
+  time: new Date().toLocaleString()
+});
+
+// Keep only last 100 records
+history = history.slice(0, 100);
+localStorage.setItem('predictionHistory', JSON.stringify(history));
+loadHistory();
+}
+
+// Check pending predictions against actual results
+function checkHistoryResults(results){
+let history = JSON.parse(localStorage.getItem('predictionHistory') || '[]');
+let changed = false;
+
+results.forEach(r => {
+  const idx = history.findIndex(h => h.period === r.period && h.result === 'pending');
+  if(idx !== -1){
+    const h = history[idx];
+    h.actual = r.digit;
+    const predBig = parseInt(h.prediction) >= 5;
+    const actualBig = parseInt(r.digit) >= 5;
+    h.result = (predBig === actualBig) ? 'WIN' : 'LOSS';
+    changed = true;
+  }
+});
+
+if(changed){
+  localStorage.setItem('predictionHistory', JSON.stringify(history));
+  loadHistory();
+}
+}
+
+// Load and render history
+function loadHistory(){
+const history = JSON.parse(localStorage.getItem('predictionHistory') || '[]');
+const tbody = document.getElementById('historyTable');
+tbody.innerHTML = '';
+
+if(history.length === 0){
+  tbody.innerHTML = '<tr><td colspan="5" style="color:#888;">No history yet...</td></tr>';
+  document.getElementById('historyStats').innerText = '';
+  return;
+}
+
+let wins = 0, losses = 0, pending = 0;
+
+history.forEach(h => {
+  let resultClass = 'pending';
+  let resultText = '⏳ Pending';
+  if(h.result === 'WIN'){ resultClass = 'win'; resultText = '✅ WIN'; wins++; }
+  else if(h.result === 'LOSS'){ resultClass = 'loss'; resultText = '❌ LOSS'; losses++; }
+  else { pending++; }
+
+  const predBig = parseInt(h.prediction) >= 5;
+  const predLabel = predBig ? 'Big' : 'Small';
+
+  tbody.innerHTML += `<tr>
+    <td>${h.period}</td>
+    <td>${predLabel} (${h.prediction})</td>
+    <td>${h.actual ?? '-'}</td>
+    <td class="${resultClass}">${resultText}</td>
+    <td style="font-size:12px;">${h.time}</td>
+  </tr>`;
+});
+
+const total = wins + losses;
+const acc = total > 0 ? ((wins / total) * 100).toFixed(1) : '0.0';
+document.getElementById('historyStats').innerHTML =
+  `Total: <b>${history.length}</b> | ✅ Wins: <b class="win">${wins}</b> | ❌ Losses: <b class="loss">${losses}</b> | ⏳ Pending: <b class="pending">${pending}</b> | Accuracy: <b>${acc}%</b>`;
+}
+
+function clearHistory(){
+if(confirm('Clear all prediction history?')){
+  localStorage.removeItem('predictionHistory');
+  loadHistory();
+}
+}
+
+/* ========== MANUAL SEARCH ========== */
+async function manualSearch(){
+const seq=document.getElementById("manualSeq").value.trim();
+if(!seq) return;
+
+const {data}=await supabaseClient
+.from('predictions')
+.select('*')
+.eq('sequence',seq)
+.maybeSingle();
+
+if(data){
+document.getElementById("manualResult").innerHTML="Found ✅ Next: "+data.next_numbers;
+}else{
+document.getElementById("manualResult").innerText="No Data Found ❌";
+}
+}
+</script>
+
+</body>
+</html>
